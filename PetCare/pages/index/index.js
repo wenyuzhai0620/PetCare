@@ -4,14 +4,15 @@ const ACTIONS = [
   { type: "internalDeworm", label: "内驱虫", icon: "内", quickText: "记录一次内驱虫", intervalDays: 90, configurable: true },
   { type: "externalDeworm", label: "外驱虫", icon: "外", quickText: "记录一次外驱虫", intervalDays: 30, configurable: true },
   { type: "bath", label: "洗澡", icon: "浴", quickText: "记录一次洗澡", intervalDays: 30, configurable: true },
-  { type: "walk", label: "遛狗", icon: "走", quickText: "记录一次出门", intervalDays: 1 },
-  { type: "poop", label: "拉屎", icon: "便", quickText: "次数 +1", intervalDays: 1 }
+  { type: "walk", label: "遛狗", icon: "走", quickText: "记录一次出门", intervalDays: 1 }
 ];
+
+const QUICK_ACTION_TYPES = ["internalDeworm", "externalDeworm", "bath"];
 
 const DEFAULT_STATE = {
   pets: [
-    { id: "pet-cat", name: "小橘", type: "cat", age: "1岁", careIntervals: { internalDeworm: 90, externalDeworm: 30, bath: 180 } },
-    { id: "pet-dog", name: "豆豆", type: "dog", age: "3岁", careIntervals: { internalDeworm: 90, externalDeworm: 30, bath: 30 } }
+    { id: "pet-cat", name: "小橘", type: "cat", birthMonth: "2025-05", weight: "4.2", careIntervals: { internalDeworm: 90, externalDeworm: 30, bath: 180 } },
+    { id: "pet-dog", name: "豆豆", type: "dog", birthMonth: "2023-05", weight: "12.5", careIntervals: { internalDeworm: 90, externalDeworm: 30, bath: 30 } }
   ],
   activePetId: "pet-cat",
   records: []
@@ -20,6 +21,11 @@ const DEFAULT_STATE = {
 const LEGACY_ACTIONS = {
   deworm: { label: "驱虫" }
 };
+
+function getAvailableActions(pet) {
+  if (!pet) return [];
+  return ACTIONS.filter((action) => pet.type === "dog" || action.type !== "walk");
+}
 
 function getDefaultIntervals(type) {
   return {
@@ -41,6 +47,8 @@ function normalizeIntervals(type, intervals = {}) {
 function normalizePet(pet) {
   return {
     ...pet,
+    birthMonth: pet.birthMonth || inferBirthMonthFromAge(pet.age) || monthKey(),
+    weight: pet.weight || "",
     careIntervals: normalizeIntervals(pet.type, pet.careIntervals)
   };
 }
@@ -62,12 +70,52 @@ function todayKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function monthKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function inferBirthMonthFromAge(age) {
+  const match = String(age || "").match(/\d+/);
+  const years = Number(match ? match[0] : 0);
+  if (!years) return "";
+  const date = new Date();
+  date.setFullYear(date.getFullYear() - years);
+  return monthKey(date);
+}
+
+function formatPetAge(birthMonth) {
+  if (!birthMonth) return "年龄未填";
+  const [birthYear, birthMonthIndex] = birthMonth.split("-").map(Number);
+  if (!birthYear || !birthMonthIndex) return "年龄未填";
+
+  const now = new Date();
+  let months = (now.getFullYear() - birthYear) * 12 + now.getMonth() + 1 - birthMonthIndex;
+  if (months < 0) months = 0;
+  const years = Math.floor(months / 12);
+  const restMonths = months % 12;
+
+  if (years === 0) return `${restMonths}个月`;
+  if (restMonths === 0) return `${years}岁`;
+  return `${years}岁${restMonths}个月`;
+}
+
+function formatWeight(weight) {
+  return weight ? `${weight} kg` : "体重未填";
+}
+
 function formatDate(value) {
   const date = new Date(value);
   const year = date.getFullYear();
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatHeaderDate(date = new Date()) {
+  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
 }
 
 function parseDateKey(value) {
@@ -87,17 +135,23 @@ Page({
     activePetId: "",
     activePet: null,
     actions: ACTIONS,
+    quickActions: [],
     actionLabels: ACTIONS.map((item) => item.label),
     allRecords: [],
     displayRecords: [],
-    todayStats: {},
-    todayStatItems: [],
-    reminders: [],
+    overviewItems: [],
+    currentDateText: formatHeaderDate(),
     petFormVisible: false,
     recordFormVisible: false,
+    detailDrawerVisible: false,
+    detailActionLabel: "",
+    detailActionType: "",
+    detailRecords: [],
     editingPetId: "",
-    petForm: { name: "", type: "cat", age: "", careIntervals: getDefaultIntervals("cat") },
+    petForm: { name: "", type: "cat", birthMonth: monthKey(), weight: "", careIntervals: getDefaultIntervals("cat") },
+    birthMaxMonth: monthKey(),
     recordTypeIndex: 0,
+    selectedRecordType: "",
     recordDate: todayKey(),
     recordMaxDate: todayKey(),
     recordDuePreview: "",
@@ -110,6 +164,7 @@ Page({
       ? { ...saved, allRecords: saved.allRecords || saved.records || [] }
       : { ...DEFAULT_STATE, allRecords: DEFAULT_STATE.records };
     state.pets = (state.pets || []).map(normalizePet);
+    state.allRecords = (state.allRecords || []).filter((record) => record.type !== "poop");
     this.setData(state, () => this.refreshView());
   },
 
@@ -132,51 +187,59 @@ Page({
         dateText: formatDate(record.createdAt)
       }));
 
+    const actions = getAvailableActions(activePet);
+
     this.setData({
-      activePet: activePet ? { ...activePet, typeLabel: activePet.type === "dog" ? "狗狗" : "猫咪" } : null,
+      activePet: activePet ? {
+        ...activePet,
+        typeLabel: activePet.type === "dog" ? "狗狗" : "猫咪",
+        ageText: formatPetAge(activePet.birthMonth),
+        weightText: formatWeight(activePet.weight)
+      } : null,
+      actions,
+      quickActions: actions.filter((action) => QUICK_ACTION_TYPES.includes(action.type)),
+      actionLabels: actions.map((item) => item.label),
       displayRecords: petRecords,
-      todayStats: this.buildTodayStats(petRecords),
-      todayStatItems: this.buildTodayStatItems(petRecords),
-      reminders: this.buildReminders(petRecords, activePet)
+      overviewItems: this.buildOverviewItems(petRecords, activePet, actions),
+      detailRecords: this.data.detailActionType ? this.filterRecordsByType(petRecords, this.data.detailActionType) : this.data.detailRecords,
+      recordTypeIndex: Math.min(this.data.recordTypeIndex, Math.max(actions.length - 1, 0))
     });
     this.persist();
   },
 
-  buildTodayStats(records) {
-    const key = todayKey();
-    return ACTIONS.reduce((stats, action) => {
-      stats[action.type] = records.filter((record) => record.type === action.type && todayKey(new Date(record.createdAt)) === key).length;
-      return stats;
-    }, {});
-  },
-
-  buildTodayStatItems(records) {
-    const stats = this.buildTodayStats(records);
-    return ACTIONS.map((action) => ({
+  buildOverviewItems(records, pet, actions = this.data.actions) {
+    return actions.map((action, index) => ({
       type: action.type,
       label: action.label,
-      count: stats[action.type] || 0
+      ...this.buildActionSummary(records, pet, action),
+      tone: index % 4
     }));
   },
 
-  buildReminders(records, pet) {
-    if (!pet) return [];
-    const now = new Date();
-    return ACTIONS.filter((action) => action.type !== "poop").map((action) => {
-      const latest = records.find((record) => record.type === action.type);
-      if (!latest) {
-        return { type: action.type, label: action.label, text: "还未记录", status: "warn" };
-      }
-      const nextDate = addDays(new Date(latest.createdAt), getCareInterval(pet, action));
-      const diffDays = Math.ceil((nextDate - now) / 86400000);
-      const text = diffDays < 0 ? `已超 ${Math.abs(diffDays)} 天` : diffDays === 0 ? "今天" : `${diffDays} 天后`;
+  buildActionSummary(records, pet, action) {
+    const actionRecords = this.filterRecordsByType(records, action.type);
+    const latest = actionRecords[0];
+    if (!latest || !pet) {
       return {
-        type: action.type,
-        label: action.label,
-        text,
-        status: diffDays <= 0 ? "warn" : diffDays <= 3 ? "soon" : "ok"
+        count: actionRecords.length,
+        lastText: "未记录",
+        nextText: "暂无",
+        nextStatus: "warn"
       };
-    });
+    }
+
+    const nextDate = addDays(new Date(latest.createdAt), getCareInterval(pet, action));
+    const diffDays = Math.ceil((nextDate - new Date()) / 86400000);
+    return {
+      count: actionRecords.length,
+      lastText: latest.dateText,
+      nextText: diffDays < 0 ? `已超 ${Math.abs(diffDays)} 天` : diffDays === 0 ? "今天" : `${diffDays} 天`,
+      nextStatus: diffDays <= 0 ? "warn" : diffDays <= 3 ? "soon" : "ok"
+    };
+  },
+
+  filterRecordsByType(records, type) {
+    return records.filter((record) => record.type === type);
   },
 
   selectPet(event) {
@@ -184,13 +247,39 @@ Page({
   },
 
   quickRecord(event) {
-    const action = ACTIONS.find((item) => item.type === event.currentTarget.dataset.type);
-    const recordTypeIndex = ACTIONS.findIndex((item) => item.type === action.type);
+    const action = this.data.actions.find((item) => item.type === event.currentTarget.dataset.type);
+    if (!action) return;
+    const recordTypeIndex = this.data.actions.findIndex((item) => item.type === action.type);
     this.showRecordForm(recordTypeIndex);
   },
 
+  showQuickDrawer() {
+    const firstQuickAction = this.data.quickActions[0];
+    const recordTypeIndex = this.data.actions.findIndex((item) => firstQuickAction && item.type === firstQuickAction.type);
+    this.setData({
+      recordFormVisible: true,
+      recordTypeIndex: recordTypeIndex >= 0 ? recordTypeIndex : 0,
+      selectedRecordType: firstQuickAction ? firstQuickAction.type : "",
+      recordDate: todayKey(),
+      recordMaxDate: todayKey(),
+      recordDuePreview: "",
+      recordNote: ""
+    }, () => this.updateRecordDuePreview());
+  },
+
+  hideQuickDrawer() {
+    this.setData({ recordFormVisible: false });
+  },
+
+  selectQuickAction(event) {
+    const type = event.currentTarget.dataset.type;
+    const recordTypeIndex = this.data.actions.findIndex((item) => item.type === type);
+    if (recordTypeIndex < 0) return;
+    this.setData({ recordTypeIndex, selectedRecordType: type }, () => this.updateRecordDuePreview());
+  },
+
   addRecord(type, note, dateKey = todayKey()) {
-    if (!this.data.activePetId) return;
+    if (!this.data.activePetId || type === "poop") return;
     const recordDate = parseDateKey(dateKey);
     const record = {
       id: `record-${Date.now()}`,
@@ -210,14 +299,37 @@ Page({
     this.setData({ allRecords: this.data.allRecords.filter((record) => record.id !== id) }, () => this.refreshView());
   },
 
+  showActionDetail(event) {
+    const type = event.currentTarget.dataset.type;
+    const action = this.data.actions.find((item) => item.type === type);
+    if (!action) return;
+    this.setData({
+      detailDrawerVisible: true,
+      detailActionType: type,
+      detailActionLabel: action.label,
+      detailRecords: this.filterRecordsByType(this.data.displayRecords, type)
+    });
+  },
+
+  hideActionDetail() {
+    this.setData({
+      detailDrawerVisible: false,
+      detailActionType: "",
+      detailActionLabel: "",
+      detailRecords: []
+    });
+  },
+
+  noop() {},
+
   showPetForm() {
     const pet = this.data.activePet;
     this.setData({
       petFormVisible: true,
       editingPetId: pet ? pet.id : "",
       petForm: pet
-        ? { name: pet.name, type: pet.type, age: pet.age, careIntervals: normalizeIntervals(pet.type, pet.careIntervals) }
-        : { name: "", type: "cat", age: "", careIntervals: getDefaultIntervals("cat") }
+        ? { name: pet.name, type: pet.type, birthMonth: pet.birthMonth || monthKey(), weight: pet.weight || "", careIntervals: normalizeIntervals(pet.type, pet.careIntervals) }
+        : { name: "", type: "cat", birthMonth: monthKey(), weight: "", careIntervals: getDefaultIntervals("cat") }
     });
   },
 
@@ -246,6 +358,10 @@ Page({
     });
   },
 
+  setPetBirthMonth(event) {
+    this.setData({ "petForm.birthMonth": event.detail.value });
+  },
+
   updateCareInterval(event) {
     const field = event.currentTarget.dataset.field;
     this.setData({ [`petForm.careIntervals.${field}`]: event.detail.value });
@@ -259,6 +375,8 @@ Page({
     }
     const petForm = {
       ...this.data.petForm,
+      weight: `${this.data.petForm.weight || ""}`.trim(),
+      birthMonth: this.data.petForm.birthMonth || monthKey(),
       careIntervals: normalizeIntervals(this.data.petForm.type, this.data.petForm.careIntervals)
     };
 
@@ -279,17 +397,16 @@ Page({
   },
 
   showRecordForm(recordTypeIndex = 0) {
+    if (this.data.actions.length === 0) return;
+    const safeIndex = Math.min(recordTypeIndex, this.data.actions.length - 1);
     this.setData({
       recordFormVisible: true,
-      recordTypeIndex,
+      recordTypeIndex: safeIndex,
+      selectedRecordType: this.data.actions[safeIndex].type,
       recordDate: todayKey(),
       recordMaxDate: todayKey(),
       recordNote: ""
     }, () => this.updateRecordDuePreview());
-  },
-
-  showCustomRecord() {
-    this.showRecordForm(0);
   },
 
   hideRecordForm() {
@@ -297,7 +414,11 @@ Page({
   },
 
   setRecordType(event) {
-    this.setData({ recordTypeIndex: Number(event.detail.value) }, () => this.updateRecordDuePreview());
+    const recordTypeIndex = Number(event.detail.value);
+    this.setData({
+      recordTypeIndex,
+      selectedRecordType: this.data.actions[recordTypeIndex].type
+    }, () => this.updateRecordDuePreview());
   },
 
   setRecordDate(event) {
@@ -309,9 +430,9 @@ Page({
   },
 
   updateRecordDuePreview() {
-    const action = ACTIONS[this.data.recordTypeIndex];
+    const action = this.data.actions[this.data.recordTypeIndex];
     const pet = this.data.activePet;
-    if (!action || !pet || action.type === "poop") {
+    if (!action || !pet) {
       this.setData({ recordDuePreview: "" });
       return;
     }
@@ -326,7 +447,8 @@ Page({
   },
 
   saveCustomRecord() {
-    const action = ACTIONS[this.data.recordTypeIndex];
+    const action = this.data.actions[this.data.recordTypeIndex];
+    if (!action) return;
     this.setData({ recordFormVisible: false }, () => {
       this.addRecord(action.type, this.data.recordNote.trim() || action.quickText, this.data.recordDate);
     });

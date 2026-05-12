@@ -1,10 +1,13 @@
 <view class="page">
-  <view class="header">
-    <view>
-      <text class="eyebrow">Pet Care</text>
-      <view class="title">宠物照护记录</view>
-    </view>
-    <button class="icon-btn" bindtap="showPetForm">+</button>
+  <view class="topbar">
+    <view class="topbar-spacer"></view>
+    <view class="nav-title">摘要</view>
+    <button class="icon-btn pet-edit-btn" bindtap="showPetForm">宠</button>
+  </view>
+
+  <view class="summary-head">
+    <text class="eyebrow">{{currentDateText}}</text>
+    <view class="title">照护摘要</view>
   </view>
 
   <scroll-view class="pet-tabs" scroll-x enhanced show-scrollbar="{{false}}">
@@ -20,67 +23,44 @@
     <view class="pet-main">
       <view>
         <view class="pet-name">{{activePet.name}}</view>
-        <view class="pet-meta">{{activePet.typeLabel}} · {{activePet.age || '年龄未填'}}</view>
+        <view class="pet-meta">{{activePet.typeLabel}} · {{activePet.ageText}} · {{activePet.weightText}}</view>
       </view>
       <button class="ghost-btn" bindtap="showPetForm">编辑</button>
     </view>
 
-    <view class="quick-grid">
-      <block wx:for="{{actions}}" wx:key="type">
-        <button class="quick-card" data-type="{{item.type}}" bindtap="quickRecord">
-          <text class="quick-icon">{{item.icon}}</text>
-          <text class="quick-title">{{item.label}}</text>
-          <text class="quick-sub">{{item.quickText}}</text>
-        </button>
-      </block>
-    </view>
-
-    <view class="section">
-      <view class="section-title">今日概览</view>
-      <view class="stats">
-        <view class="stat" wx:for="{{todayStatItems}}" wx:key="type">
-          <text class="stat-num">{{item.count}}</text>
-          <text class="stat-label">{{item.label}}</text>
-        </view>
-      </view>
-    </view>
-
-    <view class="section">
-      <view class="section-title">下次事项</view>
-      <view class="reminders">
-        <block wx:for="{{reminders}}" wx:key="type">
-          <view class="reminder {{item.status}}">
-            <text>{{item.label}}</text>
-            <text>{{item.text}}</text>
-          </view>
-        </block>
-      </view>
-    </view>
-
-    <view class="section">
+    <view class="section quick-entry" bind:tap="showQuickDrawer">
       <view class="section-head">
-        <view class="section-title">记录明细</view>
-        <button class="ghost-btn" bindtap="showCustomRecord">手动添加</button>
+        <view class="section-title">快捷记录</view>
       </view>
-      <view wx:if="{{displayRecords.length === 0}}" class="empty">还没有记录，点上面的快捷按钮开始。</view>
-      <block wx:for="{{displayRecords}}" wx:key="id">
-        <view class="record">
-          <view>
-            <view class="record-title">{{item.label}}</view>
-            <view class="record-note">{{item.note || '无备注'}}</view>
+      <button class="quick-add-btn" hover-class="none" bind:tap="showQuickDrawer">+ 添加护理</button>
+    </view>
+
+    <view class="section">
+      <view class="section-title">总体概览</view>
+      <view class="stats">
+        <view class="stat tone-{{item.tone}} {{item.nextStatus}}" wx:for="{{overviewItems}}" wx:key="type">
+          <text class="stat-label">{{item.label}}</text>
+          <view class="stat-value">
+            <text class="stat-num">{{item.count}}</text>
+            <text class="stat-unit">次</text>
           </view>
-          <view class="record-right">
-            <text>{{item.dateText}}</text>
-            <button class="delete-btn" data-id="{{item.id}}" bindtap="deleteRecord">删除</button>
+          <view class="stat-row">
+            <text>上一次</text>
+            <text>{{item.lastText}}</text>
           </view>
+          <view class="stat-row">
+            <text>距离下次</text>
+            <text>{{item.nextText}}</text>
+          </view>
+          <button class="detail-btn" data-type="{{item.type}}" bindtap="showActionDetail">详情</button>
         </view>
-      </block>
+      </view>
     </view>
   </view>
 
   <view wx:else class="empty-panel">
     <view class="empty-title">先添加一个宠物</view>
-    <view class="empty-text">支持猫和狗，可记录内驱虫、外驱虫、洗澡、遛狗和便便次数。</view>
+    <view class="empty-text">支持猫和狗，可记录内驱虫、外驱虫、洗澡和遛狗。</view>
     <button class="primary-btn" bindtap="showPetForm">添加宠物</button>
   </view>
 
@@ -92,7 +72,18 @@
         <button class="{{petForm.type === 'cat' ? 'selected' : ''}}" data-type="cat" bindtap="setPetType">猫</button>
         <button class="{{petForm.type === 'dog' ? 'selected' : ''}}" data-type="dog" bindtap="setPetType">狗</button>
       </view>
-      <input class="input" placeholder="年龄，例如 2岁" value="{{petForm.age}}" data-field="age" bindinput="updatePetForm" />
+      <view class="profile-grid">
+        <view class="profile-field">
+          <text>出生年月</text>
+          <picker mode="date" fields="month" value="{{petForm.birthMonth}}" end="{{birthMaxMonth}}" bindchange="setPetBirthMonth">
+            <view class="picker compact-picker">{{petForm.birthMonth}}</view>
+          </picker>
+        </view>
+        <view class="profile-field">
+          <text>体重 kg</text>
+          <input class="input compact-input" type="digit" placeholder="例如 4.5" value="{{petForm.weight}}" data-field="weight" bindinput="updatePetForm" />
+        </view>
+      </view>
       <view class="form-label">默认周期（天）</view>
       <view class="interval-grid">
         <view class="interval-field">
@@ -116,11 +107,18 @@
   </view>
 
   <view wx:if="{{recordFormVisible}}" class="mask">
-    <view class="sheet">
+    <view class="sheet drawer">
+      <view class="drawer-bar"></view>
       <view class="sheet-title">添加记录</view>
-      <picker mode="selector" range="{{actionLabels}}" value="{{recordTypeIndex}}" bindchange="setRecordType">
-        <view class="picker">类型：{{actionLabels[recordTypeIndex]}}</view>
-      </picker>
+      <view class="form-label">选择类型</view>
+      <view class="type-choice-grid">
+        <block wx:for="{{quickActions}}" wx:key="type">
+          <view class="type-choice {{item.type === selectedRecordType ? 'selected' : ''}}" data-type="{{item.type}}" bind:tap="selectQuickAction">
+            <text class="quick-icon">{{item.icon}}</text>
+            <text>{{item.label}}</text>
+          </view>
+        </block>
+      </view>
       <picker mode="date" value="{{recordDate}}" end="{{recordMaxDate}}" bindchange="setRecordDate">
         <view class="picker">上次时间：{{recordDate}}</view>
       </picker>
@@ -128,8 +126,30 @@
       <input class="input" placeholder="备注，可选" value="{{recordNote}}" bindinput="updateRecordNote" />
       <view class="sheet-actions">
         <button class="ghost-btn" bindtap="hideRecordForm">取消</button>
-        <button class="primary-btn" bindtap="saveCustomRecord">保存</button>
+        <button class="primary-btn" bindtap="saveCustomRecord">确认</button>
       </view>
+    </view>
+  </view>
+
+  <view wx:if="{{detailDrawerVisible}}" class="mask" bindtap="hideActionDetail">
+    <view class="sheet drawer" catchtap="noop">
+      <view class="drawer-bar"></view>
+      <view class="drawer-head">
+        <view class="sheet-title">{{detailActionLabel}}历史记录</view>
+        <button class="ghost-btn" bindtap="hideActionDetail">关闭</button>
+      </view>
+      <view wx:if="{{detailRecords.length === 0}}" class="empty">还没有历史记录。</view>
+      <block wx:for="{{detailRecords}}" wx:key="id">
+        <view class="record">
+          <view>
+            <view class="record-title">{{item.dateText}}</view>
+            <view class="record-note">{{item.note || '无备注'}}</view>
+          </view>
+          <view class="record-right">
+            <button class="delete-btn" data-id="{{item.id}}" bindtap="deleteRecord">删除</button>
+          </view>
+        </view>
+      </block>
     </view>
   </view>
 </view>
