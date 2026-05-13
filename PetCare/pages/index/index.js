@@ -9,6 +9,11 @@ const ACTIONS = [
 
 const QUICK_ACTION_TYPES = ["internalDeworm", "externalDeworm", "bath"];
 
+const DEFAULT_AVATARS = {
+  cat: "data:image/svg+xml;utf8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20120%20120'%3E%3Crect%20width='120'%20height='120'%20rx='28'%20fill='%23ffe7b8'/%3E%3Cpath%20d='M32%2051%2025%2026%2049%2039M88%2051%2095%2026%2071%2039'%20fill='%23ffb85c'/%3E%3Ccircle%20cx='60'%20cy='64'%20r='35'%20fill='%23ffcb7b'/%3E%3Ccircle%20cx='47'%20cy='58'%20r='5'%20fill='%23242426'/%3E%3Ccircle%20cx='73'%20cy='58'%20r='5'%20fill='%23242426'/%3E%3Cpath%20d='M55%2072h10l-5%206z'%20fill='%23ff7777'/%3E%3Cpath%20d='M47%2078c8%208%2018%208%2026%200'%20fill='none'%20stroke='%23242426'%20stroke-width='4'%20stroke-linecap='round'/%3E%3C/svg%3E",
+  dog: "data:image/svg+xml;utf8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20120%20120'%3E%3Crect%20width='120'%20height='120'%20rx='28'%20fill='%23dff6ff'/%3E%3Cellipse%20cx='34'%20cy='56'%20rx='15'%20ry='25'%20fill='%23986a3b'/%3E%3Cellipse%20cx='86'%20cy='56'%20rx='15'%20ry='25'%20fill='%23986a3b'/%3E%3Ccircle%20cx='60'%20cy='64'%20r='36'%20fill='%23f0c07a'/%3E%3Ccircle%20cx='47'%20cy='59'%20r='5'%20fill='%23242426'/%3E%3Ccircle%20cx='73'%20cy='59'%20r='5'%20fill='%23242426'/%3E%3Cellipse%20cx='60'%20cy='72'%20rx='9'%20ry='7'%20fill='%23242426'/%3E%3Cpath%20d='M50%2082c7%207%2013%207%2020%200'%20fill='none'%20stroke='%23242426'%20stroke-width='4'%20stroke-linecap='round'/%3E%3C/svg%3E"
+};
+
 const DEFAULT_STATE = {
   pets: [
     { id: "pet-cat", name: "小橘", type: "cat", birthMonth: "2025-05", weight: "4.2", careIntervals: { internalDeworm: 90, externalDeworm: 30, bath: 180 } },
@@ -49,8 +54,24 @@ function normalizePet(pet) {
     ...pet,
     birthMonth: pet.birthMonth || inferBirthMonthFromAge(pet.age) || monthKey(),
     weight: pet.weight || "",
+    avatarUrl: pet.avatarUrl || "",
     careIntervals: normalizeIntervals(pet.type, pet.careIntervals)
   };
+}
+
+function createDefaultPetForm(type = "cat") {
+  return {
+    name: "",
+    type,
+    birthMonth: monthKey(),
+    weight: "",
+    avatarUrl: "",
+    careIntervals: getDefaultIntervals(type)
+  };
+}
+
+function getPetAvatarSrc(pet = {}) {
+  return pet.avatarUrl || DEFAULT_AVATARS[pet.type] || DEFAULT_AVATARS.cat;
 }
 
 function getActionLabel(type) {
@@ -131,7 +152,9 @@ function addDays(date, days) {
 
 Page({
   data: {
+    activeTab: "home",
     pets: [],
+    displayPets: [],
     activePetId: "",
     activePet: null,
     actions: ACTIONS,
@@ -148,7 +171,8 @@ Page({
     detailActionType: "",
     detailRecords: [],
     editingPetId: "",
-    petForm: { name: "", type: "cat", birthMonth: monthKey(), weight: "", careIntervals: getDefaultIntervals("cat") },
+    petForm: createDefaultPetForm(),
+    petFormAvatarSrc: getPetAvatarSrc(createDefaultPetForm()),
     birthMaxMonth: monthKey(),
     recordTypeIndex: 0,
     selectedRecordType: "",
@@ -194,8 +218,16 @@ Page({
         ...activePet,
         typeLabel: activePet.type === "dog" ? "狗狗" : "猫咪",
         ageText: formatPetAge(activePet.birthMonth),
-        weightText: formatWeight(activePet.weight)
+        weightText: formatWeight(activePet.weight),
+        avatarSrc: getPetAvatarSrc(activePet)
       } : null,
+      displayPets: this.data.pets.map((pet) => ({
+        ...pet,
+        typeText: pet.type === "dog" ? "狗狗" : "猫咪",
+        avatarText: pet.type === "dog" ? "狗" : "猫",
+        avatarSrc: getPetAvatarSrc(pet),
+        weightText: formatWeight(pet.weight)
+      })),
       actions,
       quickActions: actions.filter((action) => QUICK_ACTION_TYPES.includes(action.type)),
       actionLabels: actions.map((item) => item.label),
@@ -244,6 +276,31 @@ Page({
 
   selectPet(event) {
     this.setData({ activePetId: event.currentTarget.dataset.id }, () => this.refreshView());
+  },
+
+  setActiveTab(event) {
+    const tab = event.currentTarget.dataset.tab;
+    this.setData({ activeTab: tab });
+  },
+
+  editPetFromList(event) {
+    const petId = event.currentTarget.dataset.id;
+    const pet = this.data.pets.find((item) => item.id === petId);
+    if (!pet) return;
+    this.setData({
+      activePetId: petId,
+      petFormVisible: true,
+      editingPetId: pet.id,
+      petForm: {
+        name: pet.name,
+        type: pet.type,
+        birthMonth: pet.birthMonth || monthKey(),
+        weight: pet.weight || "",
+        avatarUrl: pet.avatarUrl || "",
+        careIntervals: normalizeIntervals(pet.type, pet.careIntervals)
+      },
+      petFormAvatarSrc: getPetAvatarSrc(pet)
+    }, () => this.refreshView());
   },
 
   quickRecord(event) {
@@ -322,19 +379,71 @@ Page({
 
   noop() {},
 
-  showPetForm() {
-    const pet = this.data.activePet;
+  showAddPetForm() {
+    const petForm = createDefaultPetForm();
     this.setData({
       petFormVisible: true,
-      editingPetId: pet ? pet.id : "",
-      petForm: pet
-        ? { name: pet.name, type: pet.type, birthMonth: pet.birthMonth || monthKey(), weight: pet.weight || "", careIntervals: normalizeIntervals(pet.type, pet.careIntervals) }
-        : { name: "", type: "cat", birthMonth: monthKey(), weight: "", careIntervals: getDefaultIntervals("cat") }
+      editingPetId: "",
+      petForm,
+      petFormAvatarSrc: getPetAvatarSrc(petForm)
+    });
+  },
+
+  showEditPetForm() {
+    const pet = this.data.activePet;
+    if (!pet) {
+      this.showAddPetForm();
+      return;
+    }
+    this.setData({
+      petFormVisible: true,
+      editingPetId: pet.id,
+      petForm: {
+        name: pet.name,
+        type: pet.type,
+        birthMonth: pet.birthMonth || monthKey(),
+        weight: pet.weight || "",
+        avatarUrl: pet.avatarUrl || "",
+        careIntervals: normalizeIntervals(pet.type, pet.careIntervals)
+      },
+      petFormAvatarSrc: getPetAvatarSrc(pet)
     });
   },
 
   hidePetForm() {
     this.setData({ petFormVisible: false });
+  },
+
+  deletePet() {
+    const petId = this.data.editingPetId;
+    const pet = this.data.pets.find((item) => item.id === petId);
+    if (!pet) return;
+
+    wx.showModal({
+      title: "删除宠物",
+      content: `确定删除${pet.name}吗？相关护理记录也会一起删除。`,
+      confirmText: "删除",
+      confirmColor: "#ff7777",
+      success: (result) => {
+        if (!result.confirm) return;
+        const pets = this.data.pets.filter((item) => item.id !== petId);
+        const nextActivePet = pets[0] || null;
+        this.setData({
+          pets,
+          activePetId: nextActivePet ? nextActivePet.id : "",
+          allRecords: this.data.allRecords.filter((record) => record.petId !== petId),
+          petFormVisible: false,
+          editingPetId: "",
+          detailDrawerVisible: false,
+          detailActionType: "",
+          detailActionLabel: "",
+          detailRecords: []
+        }, () => {
+          this.refreshView();
+          wx.showToast({ title: "已删除", icon: "success" });
+        });
+      }
+    });
   },
 
   updatePetForm(event) {
@@ -354,7 +463,51 @@ Page({
     };
     this.setData({
       "petForm.type": nextType,
-      "petForm.careIntervals": normalizeIntervals(nextType, careIntervals)
+      "petForm.careIntervals": normalizeIntervals(nextType, careIntervals),
+      petFormAvatarSrc: this.data.petForm.avatarUrl ? this.data.petFormAvatarSrc : getPetAvatarSrc({ type: nextType })
+    });
+  },
+
+  choosePetAvatar() {
+    const saveAvatar = (tempFilePath) => {
+      if (!tempFilePath) return;
+      const setAvatar = (avatarUrl) => {
+        this.setData({
+          "petForm.avatarUrl": avatarUrl,
+          petFormAvatarSrc: avatarUrl
+        });
+      };
+
+      if (!wx.saveFile) {
+        setAvatar(tempFilePath);
+        return;
+      }
+
+      wx.saveFile({
+        tempFilePath,
+        success: (result) => setAvatar(result.savedFilePath || tempFilePath),
+        fail: () => setAvatar(tempFilePath)
+      });
+    };
+
+    if (wx.chooseMedia) {
+      wx.chooseMedia({
+        count: 1,
+        mediaType: ["image"],
+        sourceType: ["album", "camera"],
+        success: (result) => {
+          const file = result.tempFiles && result.tempFiles[0];
+          saveAvatar(file && file.tempFilePath);
+        }
+      });
+      return;
+    }
+
+    wx.chooseImage({
+      count: 1,
+      sourceType: ["album", "camera"],
+      sizeType: ["compressed"],
+      success: (result) => saveAvatar(result.tempFilePaths && result.tempFilePaths[0])
     });
   },
 
