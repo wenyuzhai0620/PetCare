@@ -4,9 +4,10 @@
   ],
   "window": {
     "navigationBarTitleText": "宠物照护记录",
-    "navigationBarBackgroundColor": "#f7fbf8",
+    "navigationBarBackgroundColor": "#f8fcf9",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#f7fbf8"
+    "backgroundColor": "#f8fcf9",
+    "navigationStyle": "custom"
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json"
